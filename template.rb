@@ -85,12 +85,9 @@ def add_users
   # Devise notices are installed via Bootstrap
   generate "devise:views:bootstrapped"
 
+  generate "model User first_name last_name announcements_last_read_at:datetime admin:boolean"
   # Create Devise User
-  generate :devise, "User",
-           "first_name",
-           "last_name",
-           "announcements_last_read_at:datetime",
-           "admin:boolean"
+  generate :devise, "User"
 
   # Set admin default to false
   in_root do
@@ -171,8 +168,9 @@ def add_announcements
   route "resources :announcements, only: [:index]"
 end
 
-def add_notifications
-  generate "model Notification recipient_id:bigint actor_id:bigint read_at:datetime action:string notifiable_id:bigint notifiable_type:string"
+def add_notifications(uuid = false)
+  id_type = uuid ? "uuid" : "bigint"
+  generate "model Notification recipient_id:#{id_type} actor_id:#{id_type} read_at:datetime action:string notifiable_id:#{id_type} notifiable_type:string"
   route "resources :notifications, only: [:index]"
 end
 
@@ -208,14 +206,21 @@ def add_administrate
   end
 end
 
-def add_multiple_authentication
-    insert_into_file "config/routes.rb",
-    ', controllers: { omniauth_callbacks: "users/omniauth_callbacks" }',
-    after: "  devise_for :users"
+def add_multiple_authentication(uuid = false)
+  insert_into_file "config/routes.rb",
+                   ', controllers: { omniauth_callbacks: "users/omniauth_callbacks" }',
+                   after: "  devise_for :users"
 
-    generate "model Service user:references provider uid access_token access_token_secret refresh_token expires_at:datetime auth:text"
+  generate "model Service user:references provider uid access_token access_token_secret refresh_token expires_at:datetime auth:text"
 
-    template = """
+  if uuid
+    file_name = Dir["db/migrate/*_create_services.rb"].last
+    gsub_file file_name,
+              /t.references :user, null: false, foreign_key: true/,
+              "t.references :user, null: false, type: :uuid, foreign_key: true"
+  end
+
+  template = "" "
     env_creds = Rails.application.credentials[Rails.env.to_sym] || {}
     %i{ facebook twitter github }.each do |provider|
       if options = env_creds[provider]
@@ -251,6 +256,7 @@ def add_sitemap
 end
 
 # Main setup
+use_uuid = yes?("Would you like to use UUIDs?")
 add_template_repository_to_source_path
 
 add_gems
@@ -258,12 +264,13 @@ add_gems
 after_bundle do
   set_application_name
   stop_spring
+  apply "enable_uuid/template.rb" if use_uuid
   add_users
   add_webpack
   add_javascript
   add_announcements
-  add_notifications
-  add_multiple_authentication
+  add_notifications(use_uuid)
+  add_multiple_authentication(use_uuid)
   add_sidekiq
   add_friendly_id
 
